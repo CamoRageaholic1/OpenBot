@@ -21,7 +21,7 @@ import {
 } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +57,7 @@ import { relativeTime } from "@/lib/relative-time";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
+import { ChannelPagination } from "./channel-pagination";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
@@ -215,6 +216,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
+  const scrollRoot = useRef<HTMLDivElement>(null);
   const searching = search.trim().length > 0;
   const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
   /*
@@ -262,7 +264,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent className="scroll-fade-b">
+      <SidebarContent ref={scrollRoot} className="scroll-fade-b">
         <SidebarMenu>
           <SidebarGroup className="gap-px">
             <SidebarMenuItem>
@@ -289,10 +291,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>
-                    <EmptyTitle>No channels match your search</EmptyTitle>
+                    <EmptyTitle>
+                      {channels.hasNextPage
+                        ? "No loaded channels match your search"
+                        : "No channels match your search"}
+                    </EmptyTitle>
                     <EmptyDescription className="text-pretty">
-                      Nothing here is named “{search.trim()}”, and nobody has
-                      said it recently either.
+                      {channels.hasNextPage
+                        ? "Load older conversations to search more of your history."
+                        : `Nothing here is named “${search.trim()}”, and nobody has said it recently either.`}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -320,6 +327,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 />
               ))}
             </AnimatePresence>
+            <ChannelPagination
+              query={channels}
+              scrollRoot={scrollRoot}
+              searching={searching}
+            />
           </SidebarGroup>
         </SidebarMenu>
       </SidebarContent>
