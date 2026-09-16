@@ -98,24 +98,27 @@ export function createHostAccessRoutes(options: {
     const body = (await context.req.json().catch(() => null)) as {
       botId?: unknown;
     } | null;
-    if (typeof body?.botId !== "string" || !body.botId) {
+    // Whitespace-only is truthy and would pass to `canUseBot` (404) and the broker naming
+    // nothing. Trimmed non-empty here, so malformed reads as malformed.
+    const botId = typeof body?.botId === "string" ? body.botId.trim() : "";
+    if (!botId) {
       return context.json({ error: "botId is required." }, 400);
     }
     const actor = context.var.actor;
-    if (!(await canUseBot(actor, body.botId))) {
+    if (!(await canUseBot(actor, botId))) {
       return context.json({ error: "That Bot is not available to you." }, 404);
     }
     try {
       const grant = await broker.requestFolderGrant({
-        botId: body.botId,
-        botName: (await options.botName?.(body.botId, actor)) ?? body.botId,
+        botId,
+        botName: (await options.botName?.(botId, actor)) ?? botId,
         actorId: actor.id,
       });
       await audit(auditStore, {
         actorUserId: actor.id,
         targetId: grant.id,
         change: "host_folder_granted",
-        botId: body.botId,
+        botId,
       });
       return context.json({ grant });
     } catch (error) {
@@ -130,11 +133,17 @@ export function createHostAccessRoutes(options: {
 
   routes.delete("/grants/:id", requireUser, async (context) => {
     const actor = context.var.actor;
+    // The catch below maps every error to 404, so a malformed id would read as "not found"
+    // instead of malformed. Checked here, before the broker or audit row.
+    const id = context.req.param("id");
+    if (!id.trim()) {
+      return context.json({ error: "A grant id is required." }, 400);
+    }
     try {
-      broker.revokeGrant(context.req.param("id"), actor.id);
+      broker.revokeGrant(id, actor.id);
       await audit(auditStore, {
         actorUserId: actor.id,
-        targetId: context.req.param("id"),
+        targetId: id,
         change: "host_folder_revoked",
       });
       return context.json({ ok: true });

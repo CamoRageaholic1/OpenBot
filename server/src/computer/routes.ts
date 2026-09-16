@@ -549,10 +549,17 @@ export function createComputerRoutes(
    */
   routes.get("/:botId/page-frame/:toolCallId", async (context) => {
     if (!pageFrames) return context.json({ frame: null });
-    const stored = await pageFrames.load(
-      context.req.param("botId"),
-      context.req.param("toolCallId"),
-    );
+    // Unvalidated params reach the frame table as-is. Blank or overlong ids can never name a
+    // stored frame, so they are refused here instead of becoming junk reads.
+    const botId = context.req.param("botId");
+    const toolCallId = context.req.param("toolCallId");
+    if (!botId.trim() || !toolCallId.trim()) {
+      return context.json({ error: "A Bot and a turn are required." }, 400);
+    }
+    if (botId.length > 200 || toolCallId.length > 200) {
+      return context.json({ error: "A Bot and a turn are required." }, 400);
+    }
+    const stored = await pageFrames.load(botId, toolCallId);
     return context.json({ frame: stored });
   });
 

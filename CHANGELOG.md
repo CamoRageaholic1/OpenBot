@@ -8,6 +8,109 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A vendor that broke no longer reads as a refusal to a Bot running its own loop
+
+When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
+whose vendor failed, or hit a fault in this deployment, the answer began "Refused." like a boundary
+holding. The conversation drew it as blocked and the model read it as not allowed, while the audit
+trail recorded a failed call. Only a refusal is marked now. A vendor that broke reads "That tool could
+not be called: …", the way it already did for a Bot running here, and a refusal reads as before.
+### A Bot running its own loop is told a vendor's error is the vendor's
+
+A vendor that says no by answering with an error, the way an MCP server refuses a call, reached a Bot
+running here as "The vendor reported an error: …", and reached a Bot calling tools back from its own
+process, such as the LangGraph Bots, as the bare sentence. Those Bots pass the answer on as they
+receive it, so their model read something like Google's "The caller does not have permission" as an
+ordinary result, and could tell the person they had no access rather than that the vendor had refused.
+Both kinds of Bot are now told the same thing. A result that is not an error, and this deployment's
+own refusals, read as before.
+### A long Composio result or failure is cut between characters, not through an emoji
+
+A Composio action's answer over 20,000 characters, and a failure sentence as long, were cut by UTF-16
+code unit. When the cut landed inside an emoji or any other character outside the Basic Multilingual
+Plane, the text handed to the model ended on half of it: a lone surrogate that JSON carries as a bare
+`\ud83d` and UTF-8 turns into a replacement character. The cut now stops one unit short in that case,
+the way the MCP and built-in transports' cuts already do. Anything that fits is untouched, and the
+note saying the answer was cut reads as before.
+
+## 0.0.12
+
+### A deployment can broker its Bots into a few hundred apps through Composio
+
+Composio holds a person's connections to a few hundred SaaS apps behind one account. A deployment
+that sets `COMPOSIO_API_KEY` now has that broker: each person connects their own accounts, a Bot is
+granted an app's tools the way it is granted any other, and every call is decided and recorded
+through the gateway like the rest. Unset, there is nothing to connect, nothing to grant and no
+Composio tool for a Bot to call, and the Plugins page says so under **More apps** rather than
+pretending otherwise. See [docs/plugins/composio.md](docs/plugins/composio.md).
+
+### A skill's grants are removed when it is uninstalled
+
+Uninstalling a skill deleted the skill but left its tool grants, which are keyed by its slug. A new
+skill created under the same slug then inherited them, and was offered on the Bots the old skill had
+been granted to with no grant ever made for it. Uninstalling now removes a skill's grants along with
+it, in one transaction, and an upgrade drops any grants already left orphaned this way.
+
+### Malformed requests are refused instead of coerced, and a fail-open is closed
+
+A pass across the write and query surface answers a malformed request with a 400 that names the bad
+field, rather than coercing it, failing at the store, or letting it through: the plugin server and
+tool-call endpoints, the admin people search and credential input, skill tools and grant ids, blank
+route ids on routines, host-access, agents and channels, the routing text length, routine dispatch
+and page-frame params, and the runtime env, tokens and model content the computer and supervisor
+read. The app reads these responses more defensively too, degrading rather than throwing on a shape
+it did not expect.
+
+One of these closed a hole rather than tightening an edge: a skill installed with a non-string entry
+in its `tools` list had that entry silently dropped, so the skill declared nothing and installed as a
+success. It is refused now.
+
+### Naming a conversation asks the endpoint OPENAI_BASE_URL names, not OpenAI
+
+The job that names a conversation sent its request to api.openai.com whatever `OPENAI_BASE_URL` said,
+while the Bots, the router and tool selection all used the configured endpoint. A deployment behind a
+gateway, a proxy or a local model therefore sent its model key, and the opening of every
+conversation, to OpenAI; OpenAI refused the key, so no conversation was ever named. The request now
+goes to the same endpoint as every other model call. A deployment that never set `OPENAI_BASE_URL`
+behaves as before.
+
+### A Bot's question to a person survives a route that fails
+
+Who "a person" is, is a seam a deployment fills in with its own on-call rota or duty desk. If that
+route failed by throwing rather than by returning a refusal — a timeout, a 502, a name that does not
+resolve — the error came straight back out of the tool, so the Bot's run ended with nothing said to
+the person waiting, and no audit row recorded that the question had reached nobody. The Bot is now
+told, in a sentence it can say, that nobody could be asked and that it must not claim otherwise, and
+an `agent.escalation_failed` row goes down carrying what the route actually threw. Deployments using
+the shipped in-conversation route are unaffected: it cannot fail.
+### Resetting a Bot's computer while the Bot is acting signs it out
+
+On a deployment with one shared computer, which is what the published image and the Helm chart run by
+default, a reset takes about two seconds to close the browser before it deletes the profile. A Bot
+action that arrived in that window started a new browser from the profile about to be deleted, so the
+Bot stayed signed in to everything until that browser next closed, while the reset reported success
+and the audit trail recorded the saved state as deleted. A Bot's browser is no longer reopened while
+it is being closed: the action waits for the reset to finish and starts signed out. Computers the
+supervisor makes per Bot were not affected.
+
+### A long control name or value in a page snapshot is cut between characters
+
+The computer's page snapshot keeps the first 200 UTF-16 code units of each control's accessible
+name and value. When that limit fell between the two halves of an emoji, the Bot was handed text
+ending on half a character, which reads as U+FFFD: a broken character that is not on the page, often
+at the end of a message the Bot had just typed into a text box. The cut now stops one code unit
+short in that case, the same rule tool results and relayed answers already follow.
+### A Bot's shell can no longer read the deployment's keys from a neighbouring process
+
+In the all-in-one image the API and the browser ran under one account, and a Bot's shell — a child
+of the browser — could read a same-account process's environment through `/proc`, whatever its own
+environment had been scrubbed to. One allowed `computer_run_command` returned `KEY_ENCRYPTION_KEY`,
+the session-signing secret and the database password, none of it on the audit trail. The API and its
+migrations now run as their own account, so the kernel refuses that read; the browser is handed only
+the variables it needs, so its own environment carries none of those keys; and the files under
+`/run/s6/container_environment` are closed to the shell. A deployment that runs each Bot in its own
+sandboxed computer, as the documentation asks for, was never exposed to this.
+
 ## 0.0.11
 
 ### The LlamaIndex Bot answers with the model the setup screen chose

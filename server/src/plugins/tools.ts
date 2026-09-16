@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { AuditInitiator } from "../audit";
 import type { SelectableSkill } from "./selection";
-import { PluginRefusedError, type PluginStore } from "./store";
+import {
+  isDeploymentFault,
+  PluginRefusedError,
+  type PluginStore,
+} from "./store";
 
 /**
  * The tools a Bot may call, as the runtime's own tool definitions, executed on the server.
@@ -27,6 +31,30 @@ import { PluginRefusedError, type PluginStore } from "./store";
  * reason is what it should be told anyway.
  */
 export const REFUSAL_MARKER = "Refused.";
+
+/**
+ * What a model is told a vendor answered: its result as written, or its error named as one.
+ *
+ * `isError` used to be dropped, and it cost a diagnosis. Google refused the Drive MCP server with
+ * `isError: true` and the text "The caller does not have permission"; the model received that as an
+ * ordinary result, believed it, and told the person it had no access to their Drive — which read as
+ * the Bot being confused rather than as the vendor refusing.
+ *
+ * The prefix is the vendor's, and says so. It is deliberately NOT `REFUSAL_MARKER`: that one means
+ * this deployment declined, and the transcript draws it as a boundary holding. A vendor saying no is
+ * a different fact with a different fix, and collapsing the two would make a misconfigured connector
+ * look like a policy working correctly.
+ *
+ * One function for both doors to one store — {@link grantedTools} for a Bot running here, and
+ * `/api/agent-tools/call` for a Bot running its own loop — because the second answered with the bare
+ * text, and neither framework Bot words an `isError` answer on its way through. Which door a Bot
+ * arrives at is a deployment topology decision, not a decision about what its model is told.
+ */
+export function vendorAnswer(result: { text: string; isError: boolean }) {
+  return result.isError
+    ? `The vendor reported an error: ${result.text}`
+    : result.text;
+}
 
 export type GrantedTool = {
   name: string;
@@ -183,26 +211,27 @@ export async function grantedTools(options: {
           actorId,
           ...(initiator ? { initiator } : {}),
         });
-        /*
-         * A vendor's error is named as one, not handed over as content.
-         *
-         * `isError` used to be dropped here, and it cost a diagnosis. Google refused the Drive MCP
-         * server with `isError: true` and the text "The caller does not have permission"; the model
-         * received that as an ordinary result, believed it, and told the person it had no access to
-         * their Drive — which read as the Bot being confused rather than as the vendor refusing.
-         *
-         * The prefix is the vendor's, and says so. It is deliberately NOT `REFUSAL_MARKER`: that one
-         * means this deployment declined, and the transcript draws it as a boundary holding. A vendor
-         * saying no is a different fact with a different fix, and collapsing the two would make a
-         * misconfigured connector look like a policy working correctly.
-         */
-        return result.isError
-          ? `The vendor reported an error: ${result.text}`
-          : result.text;
+        return vendorAnswer(result);
       } catch (error) {
         if (error instanceof PluginRefusedError) {
           return `${REFUSAL_MARKER} ${error.message}`;
         }
+        /*
+         * A contradiction in this deployment's own tables says nothing to a model.
+         *
+         * CRITERION. Nothing on the `isDeploymentFault` shelf may have its message relayed from
+         * here, whatever it says.
+         *
+         * REASON. The branch below hands `error.message` to the model, which is right for a
+         * vendor's own words — that is somebody else's software explaining itself, and the
+         * diagnosis is worth having. These are not that. `ServerRowAmbiguousError` names two of
+         * our columns and tells the reader to rename a row or correct its provenance: an
+         * instruction only an operator can carry out, arriving in an end user's model context as
+         * the reason their tool failed, from which the model can only invent something to tell
+         * them. The operator who can act on it is served on the admin surface instead, where the
+         * refresh route now answers with the sentence in full.
+         */
+        if (isDeploymentFault(error)) return "That tool could not be called.";
         // A vendor that failed is not a refusal, and the difference matters to the person reading
         // the answer: one means "not allowed", the other means "it broke".
         return error instanceof Error

@@ -383,6 +383,11 @@ export function createAgentRoutes(
   );
 
   routes.get("/:agentId", requireUser, async (context) => {
+    // A whitespace id would reach the store query and answer 500 on some backends instead of a
+    // 400 for a malformed call. Existence stays a 404; shape is checked here.
+    if (!context.req.param("agentId").trim()) {
+      return context.json({ error: "A Bot id is required." }, 400);
+    }
     try {
       const agent = await store.get(
         context.var.actor,
@@ -552,6 +557,9 @@ export function createAgentRoutes(
   });
 
   routes.post("/:agentId/duplicate", requireUser, async (context) => {
+    if (!context.req.param("agentId").trim()) {
+      return context.json({ error: "A Bot id is required." }, 400);
+    }
     try {
       const agent = await store.duplicate(
         context.var.actor,
@@ -642,6 +650,9 @@ export function createAgentRoutes(
   });
 
   routes.delete("/:agentId", requireUser, async (context) => {
+    if (!context.req.param("agentId").trim()) {
+      return context.json({ error: "A Bot id is required." }, 400);
+    }
     try {
       await store.softDelete(context.var.actor, context.req.param("agentId"));
       await record(context, "bot.deleted", context.req.param("agentId"));
@@ -664,6 +675,9 @@ export function createAgentRoutes(
    */
   routes.get("/:agentId/handoff", requireUser, async (context) => {
     const agentId = context.req.param("agentId");
+    if (!agentId.trim()) {
+      return context.json({ error: "A Bot id is required." }, 400);
+    }
     try {
       // Asked of the store, so a Bot somebody may not see is "not found" here as everywhere else,
       // rather than a list of who it can reach.

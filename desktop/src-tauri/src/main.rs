@@ -882,7 +882,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         ),
     })?;
 
-    let (logs, bun, mut secrets) = {
+    let (logs, existing_bun, mut secrets) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -1087,7 +1087,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
 
         let logs = root.join(".logs");
-        let bun = which_bun().ok_or("bun was not found, so the API server cannot be started")?;
+        let bun = which_bun();
 
         (logs, bun, secrets)
     };
@@ -1095,14 +1095,17 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // The source alone will not run: without this the server stops at a package it cannot resolve
     // and the app at a missing `vite`, neither of which mentions dependencies.
     report(&app, "dependencies", true, "installing");
-    {
+    let bun = {
         let target = root.clone();
-        let bun = bun.clone();
-        tauri::async_runtime::spawn_blocking(move || stack::install_dependencies(&target, &bun))
-            .await
-            .map_err(|error| format!("the install did not run: {error}"))?
-            .inspect_err(|error| report(&app, "dependencies", false, error.clone()))?;
-    }
+        tauri::async_runtime::spawn_blocking(move || {
+            let bun = install::ensure_bun(&target, existing_bun)?;
+            stack::install_dependencies(&target, &bun).map_err(Problem::plain)?;
+            Ok::<_, Problem>(bun)
+        })
+        .await
+        .map_err(|error| format!("the install did not run: {error}"))?
+        .inspect_err(|error| report(&app, "dependencies", false, problem_detail(error.clone())))?
+    };
     report(&app, "dependencies", true, "installed");
 
     // Never persisted or passed to Compose. Only the server process receives this credential;
@@ -1281,6 +1284,17 @@ fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
         ),
         None => Ok(()),
     }
+}
+
+/// Merely viewing setup does not give this session containers to shut down.
+/// Start records ownership before Compose up, including partial failures. Quit must still
+/// retire those runs, but an old Compose file alone is not a failed shutdown by this session.
+/// Explicit Stop keeps the unknown-runtime error so it cannot claim an unverified cleanup.
+fn down_containers_on_quit(shell: &Shell, root: &Path) -> Result<(), String> {
+    if shell.containers.lock().unwrap().is_none() {
+        return Ok(());
+    }
+    down_owned_containers(shell, root)
 }
 
 /// Reclaim held replacements before consulting durable inventory. Keep the handles and pidfile
@@ -1991,31 +2005,35 @@ fn remember_setup_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<()
     Ok(())
 }
 
+fn setup_destination<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<tauri::Url, String> {
+    // Use the intended setup destination even before the initial page has finished loading.
+    let setup = app.state::<Shell>().setup_url.lock().unwrap().clone();
+    match setup {
+        Some(setup) => setup
+            .parse()
+            .map_err(|error| format!("{setup} is not a URL: {error}")),
+        None => configured_setup_url(app.config(), tauri::is_dev(), cfg!(windows)),
+    }
+}
+
 /// Put the setup screen back, when there is something to set up again.
 #[tauri::command]
 fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there")?;
-    // Use the intended setup destination even before the initial page has finished loading.
-    let setup = app
-        .state::<Shell>()
-        .setup_url
-        .lock()
-        .unwrap()
-        .clone()
-        .map(Ok)
-        .unwrap_or_else(|| {
-            configured_setup_url(app.config(), tauri::is_dev(), cfg!(windows))
-                .map(|url| url.to_string())
-        })?;
     window
-        .navigate(
-            setup
-                .parse()
-                .map_err(|error| format!("{setup} is not a URL: {error}"))?,
-        )
+        .navigate(setup_destination(&app)?)
         .map_err(|error| format!("could not go back to setup: {error}"))
+}
+
+/// Both pages are single-page apps. Keep their route and in-memory state on restore.
+/// Compare the authority explicitly: tauri:// has an opaque URL origin.
+fn same_window_app(current: &tauri::Url, destination: &tauri::Url) -> bool {
+    destination.host_str().is_some()
+        && current.scheme() == destination.scheme()
+        && current.host_str() == destination.host_str()
+        && current.port_or_known_default() == destination.port_or_known_default()
 }
 
 fn show_setup_and_focus<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
@@ -2745,15 +2763,21 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let root = cleanup_root(&shell, &stack::default_root());
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
-    if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
+    let destination = if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
         .then(|| owned_app_url(&root, ports))
         .flatten()
     {
-        if let Ok(parsed) = url.parse() {
-            let _ = window.navigate(parsed);
-        }
+        url.parse().ok()
     } else {
-        let _ = show_setup(app.clone());
+        setup_destination(app).ok()
+    };
+    if let Some(destination) = destination {
+        let already_showing = window
+            .url()
+            .is_ok_and(|current| same_window_app(&current, &destination));
+        if !already_showing {
+            let _ = window.navigate(destination);
+        }
     }
     let _ = window.show();
     let _ = window.unminimize();
@@ -3021,7 +3045,7 @@ fn main() {
                                 &shell,
                                 &stack::default_root(),
                                 stack::stop_processes_under,
-                                |root| down_owned_containers(&shell, root),
+                                |root| down_containers_on_quit(&shell, root),
                             )
                         },
                         QuitDiagnostics {
@@ -4824,7 +4848,7 @@ fn main() {
                             &app.state::<Shell>(),
                             &fallback,
                             stack::stop_processes_under,
-                            |root| down_owned_containers(&app.state::<Shell>(), root),
+                            |root| down_containers_on_quit(&app.state::<Shell>(), root),
                         )
                     },
                     QuitDiagnostics {
@@ -5309,6 +5333,23 @@ fn main() {
                 return;
             }
             runtime_affinity("docker_default_stop");
+        }
+
+        #[test]
+        fn quit_after_only_viewing_setup_does_not_report_unowned_containers() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::quit_after_only_viewing_setup_does_not_report_unowned_containers",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            remember_selected_root(&fixture.app.state::<Shell>(), &fixture.a);
+            assert!(fixture.a.join("docker-compose.yml").exists());
+            fixture.quit();
+            assert!(
+                fixture.commands().is_empty(),
+                "viewing setup must not stop another runtime"
+            );
         }
 
         #[test]
@@ -8399,6 +8440,75 @@ fn main() {
             show_setup(app.handle().clone()).unwrap();
             assert_eq!(window.url().unwrap().as_str(), setup);
         }
+    }
+
+    #[test]
+    fn restore_matches_only_the_destination_app() {
+        for destination in [
+            "tauri://localhost/",
+            "http://tauri.localhost/",
+            "https://tauri.localhost/",
+            "http://localhost:3020/",
+            "http://127.0.0.1:3010/",
+        ] {
+            let destination: tauri::Url = destination.parse().unwrap();
+            assert!(
+                same_window_app(&destination, &destination),
+                "even identical navigation reloads the page"
+            );
+            assert!(same_window_app(
+                &destination.join("ask?thread=existing#message").unwrap(),
+                &destination
+            ));
+            for unrelated in [
+                "about:blank",
+                "http://127.0.0.1:9/stale-page",
+                "https://example.com/",
+            ] {
+                assert!(!same_window_app(&unrelated.parse().unwrap(), &destination));
+            }
+        }
+        assert!(!same_window_app(
+            &"http://localhost:3020/".parse().unwrap(),
+            &"http://localhost:3010/".parse().unwrap()
+        ));
+        assert!(!same_window_app(
+            &"http://tauri.localhost/".parse().unwrap(),
+            &"https://tauri.localhost/".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn restore_window_preserves_setup_location_when_runtime_is_unavailable() {
+        let f = RestoreFixture::new();
+        for setup in [
+            "tauri://localhost/",
+            "http://tauri.localhost/",
+            "http://localhost:3020/",
+        ] {
+            let app = f.app(&f.selected, setup);
+            let window = app.get_webview_window("main").unwrap();
+            let current = format!("{setup}#credentials");
+            window.navigate(current.parse().unwrap()).unwrap();
+            window.hide().unwrap();
+            restore_window_on(app.handle(), &f.ports);
+            assert_eq!(window.url().unwrap().as_str(), current);
+            assert!(window.is_visible().unwrap());
+        }
+    }
+
+    #[test]
+    fn restore_window_preserves_owned_app_route() {
+        let f = RestoreFixture::new();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        let window = app.get_webview_window("main").unwrap();
+        let current = format!(
+            "http://127.0.0.1:{}/ask?thread=existing#message",
+            f.ports.app
+        );
+        window.navigate(current.parse().unwrap()).unwrap();
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(window.url().unwrap().as_str(), current);
     }
 
     #[test]

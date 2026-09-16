@@ -111,6 +111,14 @@ export function createRoutingRoutes(
     } | null;
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     if (!text) return context.json({ error: "A message is required." }, 400);
+    // Unbounded text becomes the model prompt. Cap it so a multi-megabyte body cannot be used
+    // to force a timeout or OOM in the router.
+    if (text.length > 10000) {
+      return context.json(
+        { error: "A message of at most 10000 characters is required." },
+        400,
+      );
+    }
     const named =
       typeof body?.agentId === "string" && body.agentId.trim()
         ? body.agentId.trim()

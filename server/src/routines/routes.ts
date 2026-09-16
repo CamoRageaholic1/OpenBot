@@ -53,13 +53,15 @@ export function createRoutineRoutes(
     if (typeof enabled !== "boolean") {
       return context.json({ error: "enabled must be true or false." }, 400);
     }
+    // An empty id would reach the store and answer 500 on some backends instead of a 400 for a
+    // malformed call. Owner-scoping stays in the store; shape is checked here.
+    const id = context.req.param("id");
+    if (!id.trim()) {
+      return context.json({ error: "A routine id is required." }, 400);
+    }
 
     try {
-      await routineStore.setEnabled(
-        context.var.actor.id,
-        context.req.param("id"),
-        enabled,
-      );
+      await routineStore.setEnabled(context.var.actor.id, id, enabled);
       return context.json({ enabled });
     } catch (error) {
       return mapStoreError(context, error);
@@ -67,8 +69,12 @@ export function createRoutineRoutes(
   });
 
   routes.delete("/:id", requireUser, async (context) => {
+    const id = context.req.param("id");
+    if (!id.trim()) {
+      return context.json({ error: "A routine id is required." }, 400);
+    }
     try {
-      await routineStore.remove(context.var.actor.id, context.req.param("id"));
+      await routineStore.remove(context.var.actor.id, id);
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);

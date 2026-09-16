@@ -1096,13 +1096,15 @@ export function createChannelRoutes(
       await context.req.json().catch(() => null),
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    // A whitespace channel id would reach the store and answer 500 on some backends instead of
+    // a 400 for a malformed call.
+    const channelId = context.req.param("channelId");
+    if (!channelId.trim()) {
+      return context.json({ error: "A channel id is required." }, 400);
+    }
 
     try {
-      await store.recordActivity(
-        context.var.actor,
-        context.req.param("channelId"),
-        parsed.value,
-      );
+      await store.recordActivity(context.var.actor, channelId, parsed.value);
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
@@ -1115,6 +1117,9 @@ export function createChannelRoutes(
     } | null;
     if (typeof body?.busy !== "boolean") {
       return context.json({ error: "busy must be true or false" }, 400);
+    }
+    if (!context.req.param("channelId").trim()) {
+      return context.json({ error: "A channel id is required." }, 400);
     }
 
     try {
