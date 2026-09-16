@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
 import { Composer, toAgentOptions } from "@/components/channels/composer";
@@ -134,14 +134,16 @@ function RouteComponent() {
           {/*
            * The heading is repeated in each arm rather than hoisted above this conditional:
            * `CarouselPrevious`/`CarouselNext` read the carousel's own context, so they must stay
-           * inside `<Carousel>`, and the heading shares that row with them once populated.
-           * The loading skeleton reserves the cards' height. Empty and error states
-           * stay compact so an absent roster does not dominate the home screen.
+           * inside `<Carousel>`, and the heading shares that row with them once populated. Each
+           * arm also reserves the same ~180px of body beneath it — a skeleton here, the
+           * carousel's 144×180 cards, or the empty/error state's own `h-[180px]` — so the section
+           * holds its own height across all four states and the composer sitting above it on
+           * this centred column does not move when the query settles or fails.
            */}
           {loading ? (
             <>
               <h2 className="font-bold text-lg">Explore agents</h2>
-              <Skeleton className="mt-4 h-[264px]" />
+              <Skeleton className="mt-4 h-[180px]" />
             </>
           ) : explore?.length ? (
             // Wins over `failed`: a failed background refetch does not clear TanStack Query's
@@ -160,14 +162,14 @@ function RouteComponent() {
                   <CarouselNext className="static translate-x-0 translate-y-0" />
                 </div>
               </div>
-              {/* Fixed-width slides stay readable and fit within narrow mobile viewports. */}
+              {/* `-ml-4`/`pl-4` is the primitive's own gap convention; `basis-auto` keeps each
+                  slide the card's own 144px instead of a full-width slide. */}
               <CarouselContent className="-ml-4 mt-4">
                 {explore.map((agent) => (
-                  <CarouselItem
-                    className="basis-[280px] max-w-full pl-4"
-                    key={agent.id}
-                  >
-                    <AgentCard agent={agent} />
+                  <CarouselItem className="basis-auto pl-4" key={agent.id}>
+                    <Link search={{ agent: agent.id }} to="/channel/new">
+                      <AgentCard agent={agent} />
+                    </Link>
                   </CarouselItem>
                 ))}
               </CarouselContent>
