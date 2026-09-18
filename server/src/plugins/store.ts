@@ -155,6 +155,7 @@ export type WithdrawnGrant = {
 export type ServerRecord = {
   id: string;
   title: string;
+  logo: string | null;
   vendor: string;
   url: string;
   summary: string;
@@ -2923,6 +2924,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     async addBrokeredApp(input: {
       slug: string;
       title: string;
+      logo?: string | null;
       by: string;
       /**
        * How this app connects, resolved from the catalogue row the administrator chose.
@@ -3003,6 +3005,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         .values({
           id: `composio-${input.slug}`,
           title: input.title,
+          logo: input.logo ?? null,
           // The broker, whoever publishes the app behind it. `vendor` is what the first-party rule
           // is checked against, and Composio is who this deployment is actually talking to.
           vendor: "Composio",
@@ -3033,6 +3036,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           target: mcpServers.id,
           set: {
             title: input.title,
+            logo: input.logo ?? null,
             url,
             /*
              * WRITTEN BESIDE THE URL, BECAUSE THE TWO ARE ONE FACT AND A ROW HOLDING HALF OF IT IS
@@ -4012,6 +4016,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         return {
           id: row.id,
           title: row.title,
+          logo: row.logo,
           vendor: row.vendor,
           url: effectiveUrl(row, entry),
           summary: entry?.summary ?? "",

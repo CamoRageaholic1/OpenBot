@@ -88,6 +88,7 @@ import { createPeopleStore } from "./people/store";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
+import { backfillComposioLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
 import { grantedSkills, grantedTools, REFUSAL_MARKER } from "./plugins/tools";
@@ -102,6 +103,7 @@ import {
   synchronizeTenantPackage,
 } from "./tenant-package";
 import { createUserInstructionsStore } from "./user-instructions";
+import { createUserPreferencesStore } from "./user-preferences";
 import { repeatAfterEach } from "./work/loop";
 import {
   createWorkQueue,
@@ -371,6 +373,15 @@ const pluginStore = createPluginStore({
    */
   broker: composio?.broker,
 });
+
+// Logo metadata is optional; a vendor outage must not prevent the API from starting.
+if (composio) {
+  void backfillComposioLogos(database, composio.broker).catch(() => {
+    console.warn(
+      "Composio app logos could not be updated. Existing icons remain available; missing logos will be retried on the next restart.",
+    );
+  });
+}
 
 /**
  * Routines, and the one moment its tools are told what to act on.
@@ -1294,6 +1305,7 @@ const app = createApp(
   // Absent without a key, which leaves the routes reporting no broker rather than listing apps
   // nobody could connect.
   composio ? { broker: composio.broker } : undefined,
+  createUserPreferencesStore(database),
 );
 
 /**

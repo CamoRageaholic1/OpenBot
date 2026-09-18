@@ -740,7 +740,7 @@ const DIRECTORY: BrokerApp[] = [
     slug: "slack",
     name: "Slack",
     description: "Post messages and read channels.",
-    logo: null,
+    logo: "https://example.com/slack.svg",
     categories: ["communication"],
     actionCount: 63,
     connection: { kind: "consent" },
@@ -1041,6 +1041,7 @@ describe("the Composio directory", () => {
       {
         slug: "slack",
         title: "Slack",
+        logo: "https://example.com/slack.svg",
         by: ADMIN.email,
         connection: { kind: "consent" },
       },

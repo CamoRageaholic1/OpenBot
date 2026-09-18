@@ -75,6 +75,8 @@ import {
   InstructionsTooLongError,
   type UserInstructionsStore,
 } from "./user-instructions";
+import type { UserPreferencesStore } from "./user-preferences";
+import { userPreferencesRoutes } from "./user-preferences-routes";
 
 /**
  * How much of a multipart body is boundary, headers and other fields rather than file.
@@ -313,6 +315,7 @@ export function createApp(
    * no app directory to offer, rather than one that lists apps nobody can connect.
    */
   composio?: { broker: ComposioBroker },
+  userPreferences?: UserPreferencesStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -506,6 +509,11 @@ export function createApp(
    * somebody's mouth in every channel they work in. An administrator has no business here either,
    * for the same reason.
    */
+  app.route(
+    "/api/settings/preferences",
+    userPreferencesRoutes(requireUser, userPreferences),
+  );
+
   app.get("/api/settings/instructions", requireUser, async (context) => {
     if (!userInstructions) {
       return context.json(

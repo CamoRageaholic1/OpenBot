@@ -54,6 +54,10 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTime } from "@/lib/relative-time";
+import {
+  type MessageListEmphasis,
+  useMessageListEmphasis,
+} from "@/lib/settings/message-list";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -165,9 +169,11 @@ export function isUnread(
 function ChannelRow({
   channel,
   animateOrder,
+  emphasis,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
+  emphasis: MessageListEmphasis;
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -189,6 +195,7 @@ function ChannelRow({
       transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
     >
       <Channel
+        emphasis={emphasis}
         channelId={channel.id}
         participantIds={channel.agentIds}
         name={channel.name}
@@ -208,6 +215,7 @@ function ChannelRow({
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const emphasis = useMessageListEmphasis();
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -321,6 +329,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <AnimatePresence initial={false}>
               {visibleChannels.map((channel) => (
                 <ChannelRow
+                  emphasis={emphasis}
                   key={channel.id}
                   animateOrder={animateOrder}
                   channel={channel}

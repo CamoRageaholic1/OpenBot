@@ -5,6 +5,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { StandingInstructions } from "@/components/settings/standing-instructions";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -35,7 +36,7 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="How OpenBot looks and behaves for you. These apply to your account alone, on every deployment you sign in to."
+      description="How OpenBot looks and behaves for you. Message list preferences sync with your account. Theme is saved in this browser."
       title="Preferences"
     >
       <PageSection title="General">
@@ -56,9 +57,10 @@ function RouteComponent() {
             </ItemActions>
           </Item>
         </PageRows>
+        <MessageListPreference />
       </PageSection>
       {/*
-       * Above the shortcuts and below the appearance switch, because it is the only thing on this
+       * Above the shortcuts and below the appearance preferences, because it is the only thing on this
        * screen that changes what a coworker says rather than what this browser looks like.
        */}
       <StandingInstructions />

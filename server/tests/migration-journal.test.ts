@@ -128,10 +128,20 @@ const columnIn = (snapshot: Snapshot, table: string, column: string) =>
 const declared = (tail: string): { type: string; notNull: boolean } => ({
   type: tail
     .replace(/\bNOT NULL\b/gi, " ")
-    .replace(/\bDEFAULT\s+(?:'(?:[^']|'')*'|[^\s;]+)/gi, " ")
+    .replace(
+      /\bDEFAULT\s+(?:'(?:[^']|'')*'(?:\s*::\s*[\w.]+(?:\[\])?)*|[^\s;]+)/gi,
+      " ",
+    )
     .trim()
     .replace(/\s+/g, " "),
   notNull: /\bNOT NULL\b/i.test(tail),
+});
+
+test("column declarations exclude the cast on a quoted JSON default", () => {
+  expect(declared(" jsonb DEFAULT '{}'::jsonb NOT NULL")).toEqual({
+    type: "jsonb",
+    notNull: true,
+  });
 });
 
 const everyIndexName = (snapshot: Snapshot) =>

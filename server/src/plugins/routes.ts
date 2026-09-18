@@ -802,6 +802,7 @@ export function createPluginRoutes(
       const server = await store.addBrokeredApp({
         slug: app.slug,
         title: app.name,
+        logo: app.logo,
         by: actorEmail(context),
         // Off the directory entry the administrator chose, never derived a second time here: a
         // second derivation is a second answer, which is the one thing `BrokerConnection` exists to

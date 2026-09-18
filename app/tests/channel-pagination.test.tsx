@@ -26,7 +26,8 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
-import { channelKeys, type ChannelSummary } from "@/lib/channels/queries";
+import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
+import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -162,6 +163,9 @@ function renderSidebar() {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   clients.push(queryClient);
+  queryClient.setQueryData(userPreferencesQueryOptions("user").queryKey, {
+    messageListEmphasis: "thread",
+  });
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "user",
     email: "user@example.com",
@@ -198,6 +202,20 @@ function activeObserver() {
   if (!observer) throw new Error("No active pagination observer");
   return observer;
 }
+
+test("message emphasis updates mounted rows from the account preferences cache", async () => {
+  const view = renderSidebar();
+  const agent = await view.findByText("Recent conversation");
+  const thread = view.getByText("New conversation");
+  expect(thread.className).toContain("text-[0.9rem]");
+  act(() =>
+    clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
+      messageListEmphasis: "agent",
+    }),
+  );
+  await waitFor(() => expect(agent.className).toContain("text-[0.9rem]"));
+  expect(thread.className).toContain("text-muted-foreground");
+});
 
 test("scrolling requests the cursor once, appends older rows, and stops at the final page", async () => {
   const pending = Promise.withResolvers<Response>();

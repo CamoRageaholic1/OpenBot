@@ -1,9 +1,4 @@
-import {
-  IconPin,
-  IconPinFilled,
-  IconPinnedOff,
-  IconTrash,
-} from "@tabler/icons-react";
+import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
@@ -26,8 +21,9 @@ import {
   deleteChannelMutationOptions,
   setChannelPinnedMutationOptions,
 } from "@/lib/channels/mutations";
+import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
-import { ChannelAvatar } from "../channels/avatar";
+import { ChannelItemContent } from "./channel-item-content";
 
 /**
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
@@ -46,18 +42,20 @@ export const Channel = memo(function Channel({
   pinned,
   unread,
   busy,
+  emphasis,
 }: {
   channelId: string;
   participantIds: string[];
   name: string;
   /** What the conversation is about, once named. The channel name only says which Bot it is. */
   summary?: string;
-  /** Shown on that same line until the conversation has been named. */
+  /** Used as the thread title until the conversation has been named. */
   lastMessage?: string;
   lastMessageAt?: string;
   pinned: boolean;
   unread: boolean;
   busy: boolean;
+  emphasis: MessageListEmphasis;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -70,6 +68,7 @@ export const Channel = memo(function Channel({
   });
   /* Types in only on arrival; an already-named row draws it outright. */
   const revealed = useTypedReveal(summary);
+  const threadTitle = revealed.text || lastMessage || "New conversation";
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
@@ -118,44 +117,18 @@ export const Channel = memo(function Channel({
               className: "bg-foreground/5",
             }}
           >
-            <div className="">
-              <ChannelAvatar
-                participantIds={participantIds}
-                size={32}
-                typing={busy}
-              />
-            </div>
-            <div className="flex-col min-w-0 flex-1">
-              <div className="flex flex-row items-center justify-between gap-2">
-                <span
-                  className={`text-[14px] tracking-[-1%] truncate ${
-                    unread ? "font-medium" : ""
-                  }`}
-                >
-                  {name}
-                </span>
-                <div className="text-[12px] text-muted-foreground/70">
-                  {lastMessageAt}
-                </div>
-              </div>
-              <div className="mt-px flex h-4 items-center gap-1.5">
-                <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-muted-foreground">
-                  {/* Falls back to the last message, so the line never blanks while naming runs. */}
-                  {revealed.text ?? lastMessage}
-                  {revealed.typing ? (
-                    /* Solid, not blinking: this is over in under half a second. */
-                    <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-muted-foreground/70 align-middle" />
-                  ) : null}
-                </span>
-                {unread ? (
-                  /* State about the message beats state about the row, so it sits first. */
-                  <span className="size-2 shrink-0 rounded-full bg-primary" />
-                ) : null}
-                {pinned ? (
-                  <IconPinFilled className="size-3 shrink-0 text-muted-foreground/70" />
-                ) : null}
-              </div>
-            </div>
+            <ChannelItemContent
+              participantIds={participantIds}
+              name={name}
+              title={summary || lastMessage || "New conversation"}
+              displayedTitle={threadTitle}
+              lastMessageAt={lastMessageAt}
+              emphasis={emphasis}
+              busy={busy}
+              unread={unread}
+              pinned={pinned}
+              revealing={revealed.typing}
+            />
           </Link>
         </ContextMenuTrigger>
         <ContextMenuContent>

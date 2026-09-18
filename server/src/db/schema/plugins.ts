@@ -43,6 +43,7 @@ const updatedAt = () =>
 export const mcpServers = pgTable("mcp_servers", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  logo: text("logo"),
   /** The vendor this server is maintained by, which is what the first-party rule is checked against. */
   vendor: text("vendor").notNull(),
   url: text("url").notNull(),

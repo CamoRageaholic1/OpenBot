@@ -288,6 +288,20 @@
       "when": 1789495814957,
       "tag": "0040_drop_orphaned_skill_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789569523560,
+      "tag": "0041_user_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789579982431,
+      "tag": "0042_plugin_logos",
+      "breakpoints": true
     }
   ]
 }
