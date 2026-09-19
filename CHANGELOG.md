@@ -125,6 +125,34 @@ documented and hoped for:
 A deployment that names no domains and leaves the tenant multi-tenant warns instead of refusing,
 because genuinely multi-tenant is a real deployment.
 
+### Under a multi-tenant Entra audience, the verified claim decides who somebody is
+
+`mapEntraProfile` read `email` first, which is populated from directory attributes Microsoft does
+not verify against a domain. In your own tenant that is right and unchanged. Under `common`,
+`organizations` or `consumers` it is not your directory: anybody may create a tenant and write
+`ceo@yourcompany.com` into their own user's `mail`. That string then becomes the identity every
+authorization decision is keyed on, `INITIAL_ADMIN_EMAILS` included. On those three audiences `upn`
+is preferred, whose suffix must be a domain verified in the tenant. Single-tenant deployments see no
+change.
+
+### No sign-in cannot be combined with an address other people reach
+
+`OPENBOT_SINGLE_USER=true` admits every request as one administrator. The flag is how somebody says
+they meant that, and it still is. What was missing is the second question: one administrator and no
+sign-in is a thing you run where only you can reach it, and nothing checked the address.
+
+It is now refused alongside `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL`, or any `TRUSTED_ORIGINS` entry
+that is not loopback, and the refusal names the address it objected to. This is the rule the chart
+already applies twice, in `validation.yaml`, moved to where a deployment that never goes near Helm
+is asked it too: `.env.example` ships the flag on so that a clone runs, and README's "Deploy it"
+hands that same `.env` to `docker run`, where the only thing separating a laptop from a server is
+an address.
+
+Nothing on loopback changes, so the local workflow the flag exists for is untouched, and neither is
+the chart's `config.singleUser` trial mode, which sets no public address. Explicitly NOT gated on
+`NODE_ENV`: the image and the chart both set it to `production` for every deployment including that
+trial, so it says nothing about who can reach a deployment.
+
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file

@@ -518,6 +518,44 @@ describe("deployment configuration", () => {
     );
   });
 
+  // One administrator and no sign-in is a thing you run where only you can reach it. NOT gated on
+  // NODE_ENV: the image and the chart both set it to production for every deployment, the local
+  // trial included, so it says nothing about who can reach this.
+  test.each([
+    ["a public URL", { OPENBOT_PUBLIC_URL: "https://openbot.example.com" }],
+    ["an app URL", { OPENBOT_APP_URL: "https://openbot.example.com" }],
+    ["a trusted origin", { TRUSTED_ORIGINS: "https://openbot.example.com" }],
+    [
+      "one published origin among loopback ones",
+      { TRUSTED_ORIGINS: "http://localhost:3010,https://openbot.example.com" },
+    ],
+    ["an address that is not a URL at all", { OPENBOT_PUBLIC_URL: "openbot" }],
+  ])("refuses no sign-in combined with %s", (_label, published) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...published }),
+    ).toThrow("OPENBOT_SINGLE_USER");
+  });
+
+  // The local workflow the flag exists for, and the two addresses the quick start hands out.
+  test.each([
+    {},
+    { TRUSTED_ORIGINS: "http://localhost:3010" },
+    { TRUSTED_ORIGINS: "http://127.0.0.1:3010,http://[::1]:3010" },
+    { OPENBOT_PUBLIC_URL: "http://127.0.0.1:3001" },
+    // The chart and the image both set this for every install; it must decide nothing. A real key
+    // comes with it because the gate beside this one refuses the example key under production, and
+    // this case is about sign-in rather than about that.
+    {
+      NODE_ENV: "production",
+      KEY_ENCRYPTION_KEY: productionEnvironment.KEY_ENCRYPTION_KEY,
+      TRUSTED_ORIGINS: "http://localhost:3010",
+    },
+  ])("still runs with no sign-in on loopback: %j", (loopback) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...loopback }),
+    ).not.toThrow();
+  });
+
   test("is off, and lists nothing, when no provider is configured", () => {
     const config = loadConfig({ ...withoutSignIn, ...OPEN });
 

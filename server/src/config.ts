@@ -417,6 +417,76 @@ function keyEncryptionKey(environment: Environment): string {
   return value;
 }
 
+/**
+ * Whether this deployment may run with no sign-in at all.
+ *
+ * {@link singleUserEnabled} answers whether somebody ASKED for it, and the flag is how they say so.
+ * That design is deliberate and stays: `single-user.test.ts` pins it, and the boot comment in
+ * `.github/workflows/ci.yml` says the same thing in the same words. This asks the second question
+ * the flag cannot answer, which is not "is this production" but "can anybody else reach it".
+ *
+ * NOT `NODE_ENV`. It looks like the signal and is not one here: `Dockerfile` sets
+ * `NODE_ENV=production` for every container and `openbot.commonEnv` sets it for every chart
+ * install, including the local trial the chart's own `validation.yaml` offers. Gating on it would
+ * refuse a mode the chart advertises and would fail the image-boot job in CI, which runs exactly
+ * this combination on purpose.
+ *
+ * The chart already asks the right question twice, and this is the same question moved to where a
+ * deployment that never goes near Helm is also asked it:
+ *
+ *   config.singleUser + a LoadBalancer with no source ranges -> refused
+ *   config.singleUser + config.publicUrl                     -> refused
+ *
+ * So: one administrator and no sign-in is a thing you run where only you can reach it. A public
+ * URL, or a trusted origin that is not loopback, says somebody else can. `.env.example` ships the
+ * flag on so a clone runs, and README's "Deploy it" hands that same `.env` to `docker run`; what
+ * separates those two is an address, which is what this reads.
+ */
+function singleUserAllowed(
+  environment: Environment,
+  hasProvider: boolean,
+): boolean {
+  if (!singleUserEnabled(environment, hasProvider)) return false;
+
+  const reachable = [
+    optional(environment, "OPENBOT_PUBLIC_URL"),
+    optional(environment, "OPENBOT_APP_URL"),
+    ...commaSeparated(environment, "TRUSTED_ORIGINS"),
+  ].filter((value): value is string => value !== undefined);
+
+  const published = reachable.filter((value) => !isLoopbackUrl(value));
+  if (published.length > 0) {
+    throw new Error(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, so it cannot be combined with an address other people reach: ${published.join(", ")}. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or serve it on loopback only.`,
+    );
+  }
+
+  // No warning here: index.ts already says it loudly, every boot, off `config.singleUser`.
+  return true;
+}
+
+/**
+ * Is this an address only this machine answers?
+ *
+ * Unparseable counts as published. A value that is not a URL is one nobody checked, and the safe
+ * reading of "I cannot tell" is not "it is fine".
+ */
+function isLoopbackUrl(raw: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  const bare = hostname.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  return (
+    bare === "localhost" ||
+    bare === "::1" ||
+    bare === "0:0:0:0:0:0:0:1" ||
+    /^127\./.test(bare)
+  );
+}
+
 function url(environment: Environment, name: string): string | undefined {
   const value = optional(environment, name);
   if (!value) {
@@ -1143,9 +1213,14 @@ export function loadConfig(
     oauth: { google },
     auth,
     ...(organizationAuthUrl ? { organizationAuthUrl } : {}),
+    /*
+     * The authority short-circuits this, and that ordering is load-bearing: a white-label
+     * deployment naming an external authority lets it win, and `singleUserAllowed` is never
+     * reached and so cannot refuse a combination that already resolves.
+     */
     singleUser:
       !organizationAuthUrl &&
-      singleUserEnabled(environment, configuredAuthProviders(auth).length > 0),
+      singleUserAllowed(environment, configuredAuthProviders(auth).length > 0),
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")
