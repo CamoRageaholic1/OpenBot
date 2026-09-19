@@ -303,7 +303,62 @@ describe("deployment configuration", () => {
         "http://localhost:3010",
       ],
       initialAdminEmails: ["admin@openbot.test", "owner@openbot.test"],
+      // Nothing set, so no opinion and everybody is admitted: the shape a deployment that has not
+      // heard of SIGNIN_ALLOWED_EMAIL_DOMAINS has, which is every deployment running today.
+      allowedEmailDomains: [],
     });
+  });
+
+  test("names domains the way somebody writes them", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      SIGNIN_ALLOWED_EMAIL_DOMAINS: " @Example.COM. , ,  foo.TEST ",
+    });
+
+    expect(config.auth?.allowedEmailDomains).toEqual([
+      "example.com",
+      "foo.test",
+    ]);
+  });
+
+  // A non-empty list that names nothing refuses every sign-in, and `commaSeparated` drops blanks
+  // before this normalisation rather than after it, so these three survive it.
+  test.each(["@", ".", "@."])(
+    "refuses to start when the domain list is just %p",
+    (value) => {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          SIGNIN_ALLOWED_EMAIL_DOMAINS: value,
+        }),
+      ).toThrow("names no domain");
+    },
+  );
+
+  // The list is checked against an address the signing-in tenant writes for itself, so under
+  // `common` it refuses the honest and admits the rest. Refused because the operator DID say what
+  // they wanted; the warning case below is the one that has said nothing.
+  test("refuses a domain list combined with the multi-tenant Entra default", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        MICROSOFT_OAUTH_CLIENT_ID: "microsoft-client-id",
+        MICROSOFT_OAUTH_CLIENT_SECRET: "a-long-enough-microsoft-client-secret",
+        SIGNIN_ALLOWED_EMAIL_DOMAINS: "example.com",
+      }),
+    ).toThrow("MICROSOFT_OAUTH_TENANT_ID is `common`");
+  });
+
+  test("accepts the same list against a named directory", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      MICROSOFT_OAUTH_CLIENT_ID: "microsoft-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "a-long-enough-microsoft-client-secret",
+      MICROSOFT_OAUTH_TENANT_ID: "9188040d-6c67-4c5b-b112-36a304b66dad",
+      SIGNIN_ALLOWED_EMAIL_DOMAINS: "example.com",
+    });
+
+    expect(config.auth?.allowedEmailDomains).toEqual(["example.com"]);
   });
 
   /**

@@ -46,4 +46,47 @@ describe("mapEntraProfile", () => {
   test("finds nothing rather than inventing something", () => {
     expect(mapEntraProfile({ oid: "abc", name: "A Person" })).toEqual({});
   });
+
+  /**
+   * Which claim wins, and why the tenant decides it.
+   *
+   * In your own directory `mail` is written by your administrators. Under `common` it is written by
+   * whoever created the tenant that is signing in, and nothing verifies it against a domain, so the
+   * claim whose suffix Microsoft DOES verify is the only one worth keying identity on there.
+   */
+  test("prefers the verified upn on a multi-tenant deployment", () => {
+    for (const tenantId of [
+      "common",
+      "organizations",
+      "CONSUMERS",
+      " common ",
+    ]) {
+      expect(
+        mapEntraProfile(
+          { email: "ceo@victim.test", upn: "attacker@attacker.test" },
+          { tenantId },
+        ),
+      ).toEqual({ email: "attacker@attacker.test" });
+    }
+  });
+
+  test("keeps mail on a single-tenant deployment, where it is your own directory", () => {
+    for (const tenantId of [
+      "9188040d-6c67-4c5b-b112-36a304b66dad",
+      "contoso.com",
+    ]) {
+      expect(
+        mapEntraProfile(
+          { email: "someone@acme.com", upn: "other@acme.com" },
+          { tenantId },
+        ),
+      ).toEqual({ email: "someone@acme.com" });
+    }
+  });
+
+  test("still falls back when the preferred claim is absent", () => {
+    expect(
+      mapEntraProfile({ email: "someone@acme.com" }, { tenantId: "common" }),
+    ).toEqual({ email: "someone@acme.com" });
+  });
 });

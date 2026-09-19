@@ -121,6 +121,17 @@ config:
   publicUrl: ""
   # Administrators by email address, comma-separated. Required unless singleUser is on.
   initialAdminEmails: ""
+  # Email domains admitted at sign-in, comma-separated. Empty admits everybody, which is what the
+  # providers below already do on their own: the Entra tenant is `common` unless you set it, which
+  # is any Microsoft account including personal ones, and Okta has no equivalent setting.
+  #
+  # A filter, not a boundary. It is checked against the address the provider returns, and OpenBot
+  # does not require a verified one, so the server REFUSES this combined with an Entra tenant of
+  # `common`: there the address is written by the tenant signing in. Set `auth.microsoft.tenantId`.
+  #
+  # Matched exactly, no wildcards: `example.com` admits neither `sub.example.com` nor
+  # `evil-example.com`. Name every domain your staff use.
+  allowedEmailDomains: ""
   # Every request is one fixed administrator. Local trials only; the deployment refuses to start
   # with no identity provider unless this says somebody meant it.
   singleUser: false

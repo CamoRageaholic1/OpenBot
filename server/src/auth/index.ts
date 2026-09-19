@@ -16,6 +16,7 @@ import {
   users,
   verifications,
 } from "../db/schema";
+import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
 import { encryptSsoConfig } from "./encrypt-sso-config";
 import { applyConfiguredAdmin, seedRole } from "./roles";
 
@@ -89,13 +90,52 @@ export async function stampSignIn(
  * refuses the sign-in, and being refused is a far better answer than being quietly admitted as
  * somebody the deployment cannot recognise.
  */
-export function mapEntraProfile(profile: Record<string, unknown>) {
+/**
+ * Tenants that are not a directory: Microsoft's three multi-tenant audiences.
+ *
+ * Anything else names one directory, by GUID or by a verified domain, and is therefore a directory
+ * this deployment's administrators control.
+ */
+const MULTI_TENANT_AUDIENCES = new Set([
+  "common",
+  "organizations",
+  "consumers",
+]);
+
+export function mapEntraProfile(
+  profile: Record<string, unknown>,
+  options: { tenantId?: string } = {},
+) {
   const claim = (name: string) => {
     const value = profile[name];
     return typeof value === "string" && value.includes("@") ? value : undefined;
   };
 
-  const email = claim("email") ?? claim("upn") ?? claim("preferred_username");
+  /*
+   * WHICH CLAIM, AND WHY IT DEPENDS ON THE TENANT.
+   *
+   * `email` is populated from the directory's `mail`/`otherMails` attributes, which an
+   * administrator of THAT directory writes and Microsoft does not verify against a domain. `upn` is
+   * the directory's own name for the account and its suffix must be a domain verified in the
+   * tenant.
+   *
+   * In a single-tenant deployment those administrators are yours, so `email` is the better address:
+   * it is the one your staff recognise, and it is what `INITIAL_ADMIN_EMAILS` is written against.
+   * That is the order this has always used and the order `entra-profile.test.ts` pins.
+   *
+   * Under `common`, `organizations` or `consumers` they are not yours. Anybody may create a tenant
+   * and write `ceo@yourcompany.com` into their own user's `mail`, and nothing downstream can tell:
+   * OpenBot never sets `requireEmailVerification` and never reads `users.emailVerified`, so that
+   * string becomes the identity every authorization decision is keyed on, including the
+   * `INITIAL_ADMIN_EMAILS` match. So there, the verified name wins.
+   */
+  const multiTenant =
+    options.tenantId !== undefined &&
+    MULTI_TENANT_AUDIENCES.has(options.tenantId.trim().toLowerCase());
+
+  const email = multiTenant
+    ? (claim("upn") ?? claim("email") ?? claim("preferred_username"))
+    : (claim("email") ?? claim("upn") ?? claim("preferred_username"));
   if (!email) {
     console.error(
       JSON.stringify({
@@ -230,7 +270,11 @@ export function createAuth(
               clientId: authConfig.microsoft.clientId,
               clientSecret: authConfig.microsoft.clientSecret,
               tenantId: authConfig.microsoft.tenantId,
-              mapProfileToUser: mapEntraProfile,
+              // The tenant decides which claim may be trusted. See mapEntraProfile.
+              mapProfileToUser: (profile: Record<string, unknown>) =>
+                mapEntraProfile(profile, {
+                  tenantId: authConfig.microsoft?.tenantId,
+                }),
             },
           }
         : {}),
@@ -246,6 +290,25 @@ export function createAuth(
            * list is keyed on the address rather than the id.
            */
           before: async (user) => {
+            /*
+             * Asked before the deny list because it needs no query, and before the account exists
+             * because an address this deployment does not admit must not leave a user row behind.
+             */
+            if (
+              !emailDomainAllowed(user.email, authConfig.allowedEmailDomains)
+            ) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                payload: {
+                  email: user.email,
+                  reason: "email domain not admitted by this deployment",
+                },
+              });
+              throw new APIError("FORBIDDEN", {
+                message: DOMAIN_REFUSAL_MESSAGE,
+              });
+            }
             if (await isRevoked?.(user.email)) {
               // The row a removed person coming back produces. Nothing else records the attempt:
               // no user row is written and no session exists to look at afterwards.
@@ -290,6 +353,29 @@ export function createAuth(
               .from(users)
               .where(eq(users.id, session.userId))
               .limit(1);
+            /*
+             * And again for an account that already exists, for the reason the deny list is checked
+             * twice: the user hook fires only for a new one, so a domain later removed from the
+             * list would otherwise keep admitting everybody who had already signed in once.
+             */
+            if (
+              user &&
+              !emailDomainAllowed(user.email, authConfig.allowedEmailDomains)
+            ) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                targetId: session.userId,
+                actorUserId: session.userId,
+                payload: {
+                  email: user.email,
+                  reason: "email domain not admitted by this deployment",
+                },
+              });
+              throw new APIError("FORBIDDEN", {
+                message: DOMAIN_REFUSAL_MESSAGE,
+              });
+            }
             if (user && (await isRevoked?.(user.email))) {
               await record(auditStore, {
                 eventType: "session.refused",

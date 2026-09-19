@@ -265,6 +265,10 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: INITIAL_ADMIN_EMAILS
   value: {{ .Values.config.initialAdminEmails | quote }}
 {{- end }}
+{{- if .Values.config.allowedEmailDomains }}
+- name: SIGNIN_ALLOWED_EMAIL_DOMAINS
+  value: {{ .Values.config.allowedEmailDomains | quote }}
+{{- end }}
 {{- if .Values.config.singleUser }}
 - name: OPENBOT_SINGLE_USER
   value: "true"
