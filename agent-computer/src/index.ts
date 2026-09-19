@@ -1,3 +1,5 @@
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { serve } from "bun";
 import type { Page } from "playwright";
 import {
@@ -208,6 +210,50 @@ function botIdOf(request: Request, fallback?: string | null): string {
  * would only add a syscall to every call. Everything about why confinement is harder than it looks
  * lives in workspace.ts.
  */
+/**
+ * The two directories this process cannot do its job without, checked before it says it is ready.
+ *
+ * WHY A CHECK AND NOT A CRASH LATER. Neither of these fails loudly on its own. A persistent
+ * Chromium profile it cannot write is not an error to Chromium: `launchPersistentContext` falls
+ * back to a throwaway profile, so the Bot is signed out of everything and the container is healthy.
+ * `profiles.ts` swallows the EACCES on cleanup for its own good reasons. So the failure that
+ * actually happens in the field is a green pod and an empty profile, which is the worst shape a
+ * failure can take: nothing to read, and a week of logins gone.
+ *
+ * WHEN IT HAPPENS. The volume is created root-owned and something has to hand it over. In Docker
+ * the image does it at build time; on Kubernetes the kubelet does it from `fsGroup`, which it
+ * applies only where the volume plugin reports it can. `hostPath` reports it cannot, and that is
+ * what rancher/local-path-provisioner hands out by default, which is the default StorageClass on
+ * k3s. There, uid 1001 gets a directory it cannot even list.
+ *
+ * Exiting non-zero turns that into a CrashLoopBackOff with a readable reason, which an operator can
+ * act on: chown the directory, or set `computers.podSecurityContext: null`.
+ */
+async function assertWritable(label: string, directory: string) {
+  const probe = join(directory, `.openbot-write-probe-${process.pid}`);
+  try {
+    await mkdir(directory, { recursive: true });
+    await writeFile(probe, "");
+    await rm(probe, { force: true });
+  } catch (error) {
+    console.error(
+      `${label} at ${directory} is not writable by uid ${process.getuid?.() ?? "unknown"}: ${String(error)}. ` +
+        "A Bot's files and browser profile live here, and a profile this process cannot write is one Chromium silently replaces with a throwaway, so this refuses to start instead. " +
+        "On Kubernetes this usually means the volume's storage class does not apply fsGroup, which hostPath-backed provisioners such as local-path do not: chown it to the pod's uid, or set computers.podSecurityContext to null.",
+    );
+    process.exit(1);
+  }
+}
+
+await assertWritable(
+  "The workspace",
+  process.env.WORKSPACE_DIR?.trim() || "/workspace",
+);
+await assertWritable(
+  "The browser profiles directory",
+  process.env.PROFILES_DIR?.trim() || "/profiles",
+);
+
 const workspace = createWorkspace(
   process.env.WORKSPACE_DIR?.trim() || "/workspace",
 );

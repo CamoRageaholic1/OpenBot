@@ -48,6 +48,44 @@ front of the slash. `BOT_PROVIDER` is the setting for that, and a model name wri
 behaves as it did. The framework Bot `agent-langgraph` and the Langroid Bot are unchanged, because
 neither read the slash that way.
 
+### A Bot's computer no longer runs as root on Kubernetes
+
+The image already builds `pwuser`, chowns `/workspace`, `/profiles` and `/app` to it, and the
+all-in-one image drops to it through s6. A computer pod overrides the command to run the browser
+process alone, so it never reached s6 and ran as uid 0. It now runs as `pwuser` in both the modes
+this chart runs a computer in, `shared` and `sandbox`, with `HOME` and `BUN_INSTALL` set the way s6
+sets them. `BUN_INSTALL` moves because its default is root-owned, and `bun add` in a Bot's shell
+would otherwise stop working the moment the pod stopped being root.
+
+**Kubernetes only.** The Compose and supervisor paths run `agent-computer/Dockerfile`, which builds
+no such user and is still uid 0. That is the rest of the residual #261 named and is not this change.
+
+**What it buys, and what it does not.** It is not a containment boundary against a Bot's own shell:
+the image grants `pwuser` passwordless sudo for apt-get/apt/dpkg, which escalate to root by design,
+and gVisor plus a computer per Bot remain the actual boundary. What it does buy is that the pod
+satisfies Pod Security Admission `baseline` and the org policies that reject uid 0, that root-owned
+data stops accumulating in the volumes, and that a bug yielding a constrained primitive lands as
+1001.
+
+**Before upgrading an existing release, two things.** The kubelet applies `fsGroup` only where the
+volume plugin says it can: the EBS, PD and Azure Disk CSI drivers do, `hostPath` does not, and
+hostPath is what rancher/local-path-provisioner hands out by default, which is the default
+StorageClass on k3s. On storage that cannot, the computer now refuses to start and says so, rather
+than coming up healthy with a browser profile Chromium silently replaced, which is what it did
+before this release. Chown the directory, or set `computers.podSecurityContext: null`. And an
+upgrade run with `helm upgrade --reuse-values` does not pick up a new key at all, so it keeps
+running as root and says nothing; pass the value or drop the flag.
+
+**In `computers.mode: sandbox`, existing Bots keep their old computer.** The server copies the pod
+template into a Sandbox when it creates one and never updates it, so only Bots created after the
+upgrade run as 1001. The server does restart, because the template checksum changes, which makes it
+look like the change landed everywhere. The only lever today is `reset`, which deletes that Bot's
+volumes and its logins.
+
+`fsGroupChangePolicy: OnRootMismatch` is set deliberately. Unset means `Always`, which walks every
+file on every mount; a real Chromium profile is tens of thousands of small ones, and in `sandbox`
+mode that pass would run again on every resume from idle.
+
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file
