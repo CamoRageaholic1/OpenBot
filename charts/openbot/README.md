@@ -82,7 +82,35 @@ managedNodeGroups:
     maxSize: 4
     volumeSize: 60
     volumeType: gp3
+    # A Bot has a shell, and a shell reaches whatever its pod reaches. These two put the node's
+    # own IAM role out of that reach. See below.
+    disableIMDSv1: true
+    disablePodIMDS: true
 ```
+
+**Why the two IMDS lines.** A node's instance metadata service, at 169.254.169.254, hands out that
+node's IAM role to anything that asks from the node. A Bot's computer is a pod on that node running
+commands a model chose, so `curl` against that address is one `run_command` away, and no rule in
+OpenBot's own policy engine is consulted: the engine decides browser navigation and tool calls, and
+the shell reaches the network directly.
+
+`disablePodIMDS` sets the hop limit to 1, so a packet from a pod, which has one more hop to make
+than one from the node itself, no longer arrives. `disableIMDSv1` is what turns that into a control
+rather than a formality: the hop limit applies to the IMDSv2 token PUT, and IMDSv1 is a bare GET
+with no PUT to limit, so while v1 is allowed the hop limit stops nothing. eksctl sets
+`httpTokens: required` for either flag, so the second line is belt and braces, written out because
+the first alone does nothing without it. Note this covers pods on the cluster network; a pod running
+with `hostNetwork: true` is on the node and still reaches the address.
+
+Two things eksctl will refuse rather than warn about, both worth knowing before the next edit to
+this file: `disablePodIMDS` cannot be combined with `iam.withAddonPolicies` on the same node group,
+and neither field may be set on a node group that supplies its own `launchTemplate`.
+
+The NetworkPolicy below also excepts `169.254.0.0/16`, and is the better control where it is
+enforced. It is off by default and does nothing on EKS until the VPC CNI is told to enforce it, so
+these two lines are what holds in the configuration a cluster actually starts in. Nothing in OpenBot
+wants pod-level IMDS either way: the chart reaches AWS through IRSA, which is a ServiceAccount
+annotation and a projected token rather than the node's role.
 
 ```sh
 eksctl create cluster -f cluster.yaml
@@ -401,7 +429,9 @@ reach. If your release has `networkPolicy.enabled` and `computers.mode: sandbox`
 set the range and run it again, and the policy is narrow for the first time.
 
 A Bot's computer is allowed 80 and 443 to public addresses and nothing else, which is what stops a
-browser reaching the cluster, the database, or the cloud's credential endpoint. A per-Bot egress
+browser reaching the cluster, the database, or the cloud's credential endpoint. That last one is
+worth closing at the node as well, because this policy is off until somebody turns it on: see
+`disablePodIMDS` in the EKS cluster config above. A per-Bot egress
 proxy is therefore two settings rather than one: the variable that names it, and the rule that lets
 the computer reach it.
 

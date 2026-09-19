@@ -156,6 +156,21 @@ a deployment.
 `docs/architecture.md`, `docs/deployment.md` and `docs/configuration.md` all described the old rule
 and now describe this one.
 
+### The EKS cluster recipe puts the node's IAM role out of a Bot's reach
+
+A Bot has a shell, and a shell reaches whatever its pod reaches, including the instance metadata
+service at 169.254.169.254 that hands out the node's IAM role. The NetworkPolicy excepts that
+address, but it is off by default and does nothing on EKS until the VPC CNI is told to enforce it,
+so the cluster config in the chart README now sets `disableIMDSv1` and `disablePodIMDS` on the node
+group, which closes it at the node whatever the CNI is doing.
+
+The two are one control rather than two: `disablePodIMDS` sets the hop limit to 1, and that governs
+the IMDSv2 token PUT, so it stops nothing until `disableIMDSv1` makes a token mandatory. Pods on the
+cluster network are covered; one running with `hostNetwork: true` is on the node and is not.
+
+Nothing in OpenBot wants pod-level IMDS: the chart reaches AWS through IRSA. Documentation only; no
+chart template changed, and an existing cluster is unaffected until its node group is recreated.
+
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file
