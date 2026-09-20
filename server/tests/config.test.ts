@@ -346,8 +346,30 @@ describe("deployment configuration", () => {
         MICROSOFT_OAUTH_CLIENT_SECRET: "a-long-enough-microsoft-client-secret",
         SIGNIN_ALLOWED_EMAIL_DOMAINS: "example.com",
       }),
-    ).toThrow("MICROSOFT_OAUTH_TENANT_ID is `common`");
+    ).toThrow("names no directory");
   });
+
+  /*
+   * THE AUDIENCES A LITERAL "common" CHECK WALKS PAST. Microsoft describes `organizations` as
+   * admitting any work or school account in any directory, so a domain list is exactly as
+   * unenforceable there as under `common`, and `consumers` is every personal account. A check
+   * written against one spelling is a check that refuses the careless and admits the specific.
+   */
+  test.each(["organizations", "consumers", "Common", "  COMMON  "])(
+    "refuses a domain list against the non-directory audience %p",
+    (tenantId) => {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          MICROSOFT_OAUTH_CLIENT_ID: "microsoft-client-id",
+          MICROSOFT_OAUTH_CLIENT_SECRET:
+            "a-long-enough-microsoft-client-secret",
+          MICROSOFT_OAUTH_TENANT_ID: tenantId,
+          SIGNIN_ALLOWED_EMAIL_DOMAINS: "example.com",
+        }),
+      ).toThrow("names no directory");
+    },
+  );
 
   test("accepts the same list against a named directory", () => {
     const config = loadConfig({

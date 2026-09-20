@@ -90,52 +90,13 @@ export async function stampSignIn(
  * refuses the sign-in, and being refused is a far better answer than being quietly admitted as
  * somebody the deployment cannot recognise.
  */
-/**
- * Tenants that are not a directory: Microsoft's three multi-tenant audiences.
- *
- * Anything else names one directory, by GUID or by a verified domain, and is therefore a directory
- * this deployment's administrators control.
- */
-const MULTI_TENANT_AUDIENCES = new Set([
-  "common",
-  "organizations",
-  "consumers",
-]);
-
-export function mapEntraProfile(
-  profile: Record<string, unknown>,
-  options: { tenantId?: string } = {},
-) {
+export function mapEntraProfile(profile: Record<string, unknown>) {
   const claim = (name: string) => {
     const value = profile[name];
     return typeof value === "string" && value.includes("@") ? value : undefined;
   };
 
-  /*
-   * WHICH CLAIM, AND WHY IT DEPENDS ON THE TENANT.
-   *
-   * `email` is populated from the directory's `mail`/`otherMails` attributes, which an
-   * administrator of THAT directory writes and Microsoft does not verify against a domain. `upn` is
-   * the directory's own name for the account and its suffix must be a domain verified in the
-   * tenant.
-   *
-   * In a single-tenant deployment those administrators are yours, so `email` is the better address:
-   * it is the one your staff recognise, and it is what `INITIAL_ADMIN_EMAILS` is written against.
-   * That is the order this has always used and the order `entra-profile.test.ts` pins.
-   *
-   * Under `common`, `organizations` or `consumers` they are not yours. Anybody may create a tenant
-   * and write `ceo@yourcompany.com` into their own user's `mail`, and nothing downstream can tell:
-   * OpenBot never sets `requireEmailVerification` and never reads `users.emailVerified`, so that
-   * string becomes the identity every authorization decision is keyed on, including the
-   * `INITIAL_ADMIN_EMAILS` match. So there, the verified name wins.
-   */
-  const multiTenant =
-    options.tenantId !== undefined &&
-    MULTI_TENANT_AUDIENCES.has(options.tenantId.trim().toLowerCase());
-
-  const email = multiTenant
-    ? (claim("upn") ?? claim("email") ?? claim("preferred_username"))
-    : (claim("email") ?? claim("upn") ?? claim("preferred_username"));
+  const email = claim("email") ?? claim("upn") ?? claim("preferred_username");
   if (!email) {
     console.error(
       JSON.stringify({
@@ -270,11 +231,7 @@ export function createAuth(
               clientId: authConfig.microsoft.clientId,
               clientSecret: authConfig.microsoft.clientSecret,
               tenantId: authConfig.microsoft.tenantId,
-              // The tenant decides which claim may be trusted. See mapEntraProfile.
-              mapProfileToUser: (profile: Record<string, unknown>) =>
-                mapEntraProfile(profile, {
-                  tenantId: authConfig.microsoft?.tenantId,
-                }),
+              mapProfileToUser: mapEntraProfile,
             },
           }
         : {}),

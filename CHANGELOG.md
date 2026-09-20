@@ -113,16 +113,19 @@ verified address, and Entra's `email` claim comes from a directory attribute tha
 tenant's own administrator writes. Two consequences, both now enforced at start-up rather than
 documented and hoped for:
 
-- Naming domains while `MICROSOFT_OAUTH_TENANT_ID` is `common` is **refused**. Anybody can create a
-  tenant and write your domain into their own user, so the list would refuse the honest and admit
-  the rest while reading as a control. Set your directory GUID.
+- Naming domains while `MICROSOFT_OAUTH_TENANT_ID` names no directory is **refused**. That is
+  `common`, and equally `organizations`, which Microsoft describes as admitting any work or school
+  account in any directory, and `consumers`. Anybody can create a tenant and write your domain into
+  their own user, so the list would refuse the honest and admit the rest while reading as a
+  control. Set your directory GUID.
 - A list that names nothing, which `SIGNIN_ALLOWED_EMAIL_DOMAINS=@` and a stray `.` both produce, is
   **refused**. It is a non-empty list no address can match, and left to run it turns every visitor
   away with nothing said at boot.
 
-A deployment that names no domains and leaves the tenant at `common` warns instead of refusing,
+A deployment that names no domains and leaves the tenant multi-tenant warns instead of refusing,
 because genuinely multi-tenant is a real deployment.
 
+<<<<<<< HEAD
 ### Under a multi-tenant Entra audience, the verified claim decides who somebody is
 
 `mapEntraProfile` read `email` first, which is populated from directory attributes Microsoft does
@@ -133,6 +136,8 @@ authorization decision is keyed on, `INITIAL_ADMIN_EMAILS` included. On those th
 is preferred, whose suffix must be a domain verified in the tenant. Single-tenant deployments see no
 change.
 
+=======
+>>>>>>> 71c659ad (Drop the Entra claim reordering, and refuse every audience that names no directory)
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file

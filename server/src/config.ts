@@ -525,6 +525,30 @@ function commaSeparated(environment: Environment, name: string): string[] {
 }
 
 /**
+ * Microsoft's three multi-tenant audiences, which name no directory.
+ *
+ * Anything else is a directory this deployment's administrators control, named by GUID or by a
+ * verified domain. `organizations` matters as much as `common` here and is the one a hand-written
+ * check forgets: Microsoft's own description is that it admits any work or school account in any
+ * directory, so a domain allowlist is no more enforceable under it than under `common`.
+ *
+ * Compared folded, because these arrive from an environment variable and `Common` is the same
+ * audience as `common` to Microsoft.
+ */
+const MULTI_TENANT_AUDIENCES = new Set([
+  "common",
+  "organizations",
+  "consumers",
+]);
+
+function namesNoDirectory(tenantId: string | undefined): boolean {
+  return (
+    tenantId !== undefined &&
+    MULTI_TENANT_AUDIENCES.has(tenantId.trim().toLowerCase())
+  );
+}
+
+/**
  * Sign-in, if this deployment has an identity provider to sign people in with.
  *
  * Any one of the three turns authentication on. More than one is allowed and is the normal shape
@@ -622,9 +646,9 @@ function authConfig(
    * The warning below is for the deployment that has said nothing, where multi-tenant may well be
    * the intent.
    */
-  if (allowedEmailDomains.length > 0 && microsoft?.tenantId === "common") {
+  if (allowedEmailDomains.length > 0 && namesNoDirectory(microsoft?.tenantId)) {
     throw new Error(
-      "SIGNIN_ALLOWED_EMAIL_DOMAINS names domains, but MICROSOFT_OAUTH_TENANT_ID is `common`, which admits any Microsoft account: the address the list is checked against is one the signing-in tenant writes for itself, so the list cannot hold. Set your directory GUID.",
+      `SIGNIN_ALLOWED_EMAIL_DOMAINS names domains, but MICROSOFT_OAUTH_TENANT_ID is \`${microsoft?.tenantId}\`, which names no directory and admits accounts from any of them: the address the list is checked against is one the signing-in tenant writes for itself, so the list cannot hold. Set your directory GUID.`,
     );
   }
 
@@ -636,7 +660,7 @@ function authConfig(
   if (
     isProduction(environment) &&
     allowedEmailDomains.length === 0 &&
-    microsoft?.tenantId === "common"
+    namesNoDirectory(microsoft?.tenantId)
   ) {
     console.warn(
       "MICROSOFT_OAUTH_TENANT_ID is unset, so it is `common` and any Microsoft account may sign in, including personal ones, and SIGNIN_ALLOWED_EMAIL_DOMAINS names no domain either. Set your directory GUID, or name the domains you admit.",

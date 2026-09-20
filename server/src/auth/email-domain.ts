@@ -36,8 +36,15 @@ import { domainToASCII } from "node:url";
 export function normalizeDomain(raw: string): string | undefined {
   const trimmed = raw.trim().replace(/^@+/, "").replace(/\.+$/, "");
   if (!trimmed) return undefined;
-  const ascii = domainToASCII(trimmed);
-  return ascii.length > 0 ? ascii : undefined;
+  /*
+   * Lower-cased here rather than left to `domainToASCII`, which folds case for the non-ASCII it
+   * maps and does NOT promise it for an all-ASCII label. Measured: bun 1.3.14, which the published
+   * image ships, returns "EXAMPLE.COM" unchanged, while bun 1.4.2 returns "example.com". Relying on
+   * it meant a deployment refused its own people the moment an address arrived with a capital in
+   * the domain, on the runtime it actually ships. The answer must not depend on what is underneath.
+   */
+  const ascii = domainToASCII(trimmed.toLowerCase());
+  return ascii.length > 0 ? ascii.toLowerCase() : undefined;
 }
 
 /**
