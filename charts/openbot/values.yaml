@@ -212,9 +212,14 @@ computers:
   # WHAT IT BUYS, honestly. It is not a containment boundary against a Bot's own shell: the image
   # grants `pwuser` passwordless sudo for apt-get/apt/dpkg, and those escalate to root by design
   # (`-o APT::Update::Pre-Invoke=`). gVisor and a computer per Bot remain the actual boundary. What
-  # this does buy is real and separate: the pod satisfies Pod Security Admission `baseline` and the
-  # org policies that reject uid 0 outright, root-owned data stops accumulating in the volumes, and
-  # any bug yielding a constrained primitive lands as 1001 rather than as root.
+  # this does buy is real and separate: the org policies and admission rules that reject uid 0
+  # outright, root-owned data stops accumulating in the volumes, and any bug yielding a constrained
+  # primitive lands as 1001 rather than as root.
+  #
+  # It does NOT move the pod between Pod Security Standards. `runAsNonRoot` is a restricted control
+  # rather than a baseline one, and restricted also wants `allowPrivilegeEscalation: false`,
+  # `capabilities.drop: [ALL]` and a seccomp profile, none of which are set here. Baseline was
+  # already met; restricted still is not.
   #
   # 1001, not 1000, because the base is `ubuntu:24.04` and its own `ubuntu` user already holds 1000.
   # Verified by creating the user the way the Dockerfile does:
