@@ -536,6 +536,36 @@ describe("deployment configuration", () => {
     ).toThrow("OPENBOT_SINGLE_USER");
   });
 
+  /*
+   * THE DEPLOYMENTS THE FLAG EXISTS FOR, WHICH ARE NOT LOOPBACK. A home server, a Tailnet, a VPN
+   * address, an mDNS name: none of these is a stranger's to reach, and refusing them would refuse
+   * this feature's own audience. They are allowed and warned about, not refused.
+   */
+  test.each([
+    ["a home LAN address", { OPENBOT_PUBLIC_URL: "http://192.168.1.10:3001" }],
+    ["a 10/8 address", { OPENBOT_PUBLIC_URL: "http://10.0.0.5:3001" }],
+    ["a 172.16/12 address", { OPENBOT_PUBLIC_URL: "http://172.20.1.4:3001" }],
+    ["a Tailscale address", { OPENBOT_PUBLIC_URL: "http://100.101.102.103" }],
+    ["a unique-local IPv6 address", { OPENBOT_PUBLIC_URL: "http://[fd00::1]" }],
+    ["an mDNS name", { TRUSTED_ORIGINS: "http://openbot.local:3010" }],
+    ["a single-label LAN name", { TRUSTED_ORIGINS: "http://nas:3010" }],
+  ])("still runs with no sign-in on %s", (_label, reachable) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...reachable }),
+    ).not.toThrow();
+  });
+
+  // 172.32 is outside 172.16/12, and 100.128 is outside 100.64/10. The near miss is the case a
+  // hand-written range check gets wrong, so both are pinned as refused.
+  test.each([
+    ["just outside 172.16/12", { OPENBOT_PUBLIC_URL: "http://172.32.0.1" }],
+    ["just outside 100.64/10", { OPENBOT_PUBLIC_URL: "http://100.128.0.1" }],
+  ])("refuses no sign-in on %s", (_label, published) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...published }),
+    ).toThrow("OPENBOT_SINGLE_USER");
+  });
+
   // The local workflow the flag exists for, and the two addresses the quick start hands out.
   test.each([
     {},
