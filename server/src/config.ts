@@ -417,6 +417,130 @@ function keyEncryptionKey(environment: Environment): string {
   return value;
 }
 
+/**
+ * Whether this deployment may run with no sign-in at all.
+ *
+ * {@link singleUserEnabled} answers whether somebody ASKED for it, and the flag is how they say so.
+ * That design is deliberate and stays: `single-user.test.ts` pins it, and the boot comment in
+ * `.github/workflows/ci.yml` says the same thing in the same words. This asks the second question
+ * the flag cannot answer, which is not "is this production" but "can anybody else reach it".
+ *
+ * NOT `NODE_ENV`. It looks like the signal and is not one here: `Dockerfile` sets
+ * `NODE_ENV=production` for every container and `openbot.commonEnv` sets it for every chart
+ * install, including the local trial the chart's own `validation.yaml` offers. Gating on it would
+ * refuse a mode the chart advertises and would fail the image-boot job in CI, which runs exactly
+ * this combination on purpose.
+ *
+ * The chart already asks the right question twice, and this is the same question moved to where a
+ * deployment that never goes near Helm is also asked it:
+ *
+ *   config.singleUser + a LoadBalancer with no source ranges -> refused
+ *   config.singleUser + config.publicUrl                     -> refused
+ *
+ * So: one administrator and no sign-in is a thing you run where only you can reach it. A public
+ * URL, or a trusted origin that is not loopback, says somebody else can. `.env.example` ships the
+ * flag on so a clone runs, and README's "Deploy it" hands that same `.env` to `docker run`; what
+ * separates those two is an address, which is what this reads.
+ */
+function singleUserAllowed(
+  environment: Environment,
+  hasProvider: boolean,
+): boolean {
+  if (!singleUserEnabled(environment, hasProvider)) return false;
+
+  const reachable = [
+    optional(environment, "OPENBOT_PUBLIC_URL"),
+    optional(environment, "OPENBOT_APP_URL"),
+    ...commaSeparated(environment, "TRUSTED_ORIGINS"),
+  ].filter((value): value is string => value !== undefined);
+
+  const published = reachable.filter((value) => reachOf(value) === "public");
+  if (published.length > 0) {
+    throw new Error(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, so it cannot be combined with an address the public internet reaches: ${published.join(", ")}. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or serve it somewhere only you reach.`,
+    );
+  }
+
+  /*
+   * A private address is allowed and said out loud. index.ts already warns every boot that there is
+   * no sign-in; what it cannot say, because it never reads an address, is that this one is carried
+   * beyond the machine. Whoever is on that network is an administrator here.
+   */
+  const shared = reachable.filter((value) => reachOf(value) === "private");
+  if (shared.length > 0) {
+    console.warn(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, and this deployment answers on an address beyond this machine: ${shared.join(", ")}. Anybody on that network is that administrator. Configure a sign-in provider before anybody else is on it.`,
+    );
+  }
+
+  return true;
+}
+
+/**
+ * How far an address reaches, which is the question `OPENBOT_SINGLE_USER` actually turns on.
+ *
+ * Not two answers but three, because the middle one is most of the deployments this flag exists
+ * for. "No sign-in, one administrator" is a thing people run on a home server at `192.168.1.10`,
+ * over Tailscale at `100.something`, on a VPN, or at `openbot.local`. None of those is loopback and
+ * none of them is a stranger's to reach, so refusing them would refuse the feature's own audience
+ * while the operator's only recourse is to turn off the flag that describes what they are doing.
+ *
+ * A routable public address is the different thing, and it is the one that refuses.
+ *
+ * UNPARSEABLE COUNTS AS PUBLIC, and so does an unrecognised name. A value nobody could read is not
+ * a value anybody checked, and the safe reading of "I cannot tell" is never "it is fine".
+ */
+type Reach = "loopback" | "private" | "public";
+
+function reachOf(raw: string): Reach {
+  let bare: string;
+  try {
+    bare = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return "public";
+  }
+  bare = bare.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+
+  if (
+    bare === "localhost" ||
+    bare === "::1" ||
+    bare === "0:0:0:0:0:0:0:1" ||
+    /^127\./.test(bare)
+  ) {
+    return "loopback";
+  }
+
+  if (bare.includes(":")) {
+    // fc00::/7 is the unique local range and fe80::/10 the link-local one. Both are unroutable on
+    // the public internet, which is the only property being asked about here.
+    return /^f[cd]/.test(bare) || /^fe[89ab]/.test(bare) ? "private" : "public";
+  }
+
+  const octets = bare.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part))) {
+    const [a, b] = octets.map(Number) as [number, number, number, number];
+    const privateV4 =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      // 169.254/16 is link-local, and 100.64/10 is the carrier-grade NAT range Tailscale hands out.
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127);
+    return privateV4 ? "private" : "public";
+  }
+
+  // A name rather than an address. `.local` is mDNS, `.internal` and `.home.arpa` are reserved for
+  // exactly this, and a single label with no dot at all is a LAN name that no public resolver
+  // answers. Anything else is a name somebody could look up.
+  const privateName =
+    !bare.includes(".") ||
+    bare.endsWith(".local") ||
+    bare.endsWith(".internal") ||
+    bare.endsWith(".lan") ||
+    bare.endsWith(".home.arpa");
+  return privateName ? "private" : "public";
+}
+
 function url(environment: Environment, name: string): string | undefined {
   const value = optional(environment, name);
   if (!value) {
@@ -1143,9 +1267,14 @@ export function loadConfig(
     oauth: { google },
     auth,
     ...(organizationAuthUrl ? { organizationAuthUrl } : {}),
+    /*
+     * The authority short-circuits this, and that ordering is load-bearing: a white-label
+     * deployment naming an external authority lets it win, and `singleUserAllowed` is never
+     * reached and so cannot refuse a combination that already resolves.
+     */
     singleUser:
       !organizationAuthUrl &&
-      singleUserEnabled(environment, configuredAuthProviders(auth).length > 0),
+      singleUserAllowed(environment, configuredAuthProviders(auth).length > 0),
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")

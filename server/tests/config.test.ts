@@ -518,6 +518,74 @@ describe("deployment configuration", () => {
     );
   });
 
+  // One administrator and no sign-in is a thing you run where only you can reach it. NOT gated on
+  // NODE_ENV: the image and the chart both set it to production for every deployment, the local
+  // trial included, so it says nothing about who can reach this.
+  test.each([
+    ["a public URL", { OPENBOT_PUBLIC_URL: "https://openbot.example.com" }],
+    ["an app URL", { OPENBOT_APP_URL: "https://openbot.example.com" }],
+    ["a trusted origin", { TRUSTED_ORIGINS: "https://openbot.example.com" }],
+    [
+      "one published origin among loopback ones",
+      { TRUSTED_ORIGINS: "http://localhost:3010,https://openbot.example.com" },
+    ],
+    ["an address that is not a URL at all", { OPENBOT_PUBLIC_URL: "openbot" }],
+  ])("refuses no sign-in combined with %s", (_label, published) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...published }),
+    ).toThrow("OPENBOT_SINGLE_USER");
+  });
+
+  /*
+   * THE DEPLOYMENTS THE FLAG EXISTS FOR, WHICH ARE NOT LOOPBACK. A home server, a Tailnet, a VPN
+   * address, an mDNS name: none of these is a stranger's to reach, and refusing them would refuse
+   * this feature's own audience. They are allowed and warned about, not refused.
+   */
+  test.each([
+    ["a home LAN address", { OPENBOT_PUBLIC_URL: "http://192.168.1.10:3001" }],
+    ["a 10/8 address", { OPENBOT_PUBLIC_URL: "http://10.0.0.5:3001" }],
+    ["a 172.16/12 address", { OPENBOT_PUBLIC_URL: "http://172.20.1.4:3001" }],
+    ["a Tailscale address", { OPENBOT_PUBLIC_URL: "http://100.101.102.103" }],
+    ["a unique-local IPv6 address", { OPENBOT_PUBLIC_URL: "http://[fd00::1]" }],
+    ["an mDNS name", { TRUSTED_ORIGINS: "http://openbot.local:3010" }],
+    ["a single-label LAN name", { TRUSTED_ORIGINS: "http://nas:3010" }],
+  ])("still runs with no sign-in on %s", (_label, reachable) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...reachable }),
+    ).not.toThrow();
+  });
+
+  // 172.32 is outside 172.16/12, and 100.128 is outside 100.64/10. The near miss is the case a
+  // hand-written range check gets wrong, so both are pinned as refused.
+  test.each([
+    ["just outside 172.16/12", { OPENBOT_PUBLIC_URL: "http://172.32.0.1" }],
+    ["just outside 100.64/10", { OPENBOT_PUBLIC_URL: "http://100.128.0.1" }],
+  ])("refuses no sign-in on %s", (_label, published) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...published }),
+    ).toThrow("OPENBOT_SINGLE_USER");
+  });
+
+  // The local workflow the flag exists for, and the two addresses the quick start hands out.
+  test.each([
+    {},
+    { TRUSTED_ORIGINS: "http://localhost:3010" },
+    { TRUSTED_ORIGINS: "http://127.0.0.1:3010,http://[::1]:3010" },
+    { OPENBOT_PUBLIC_URL: "http://127.0.0.1:3001" },
+    // The chart and the image both set this for every install; it must decide nothing. A real key
+    // comes with it because the gate beside this one refuses the example key under production, and
+    // this case is about sign-in rather than about that.
+    {
+      NODE_ENV: "production",
+      KEY_ENCRYPTION_KEY: productionEnvironment.KEY_ENCRYPTION_KEY,
+      TRUSTED_ORIGINS: "http://localhost:3010",
+    },
+  ])("still runs with no sign-in on loopback: %j", (loopback) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...loopback }),
+    ).not.toThrow();
+  });
+
   test("is off, and lists nothing, when no provider is configured", () => {
     const config = loadConfig({ ...withoutSignIn, ...OPEN });
 
