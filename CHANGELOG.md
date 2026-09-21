@@ -18,6 +18,15 @@ the trail saying so. The grant is now refused, naming the app. Taking a grant aw
 a dead row an administrator can see is still one they can remove, and a tool a connector has stopped
 advertising can still be granted: what a vendor lists today is not what somebody decided yesterday.
 
+### The LiteLLM Bots keep the chosen provider on a model name that contains a slash
+
+A model name the endpoint publishes with a slash in it — `qwen/qwen3-8b`, or the docs example
+`openai/gpt-5.6-terra` — was treated as already carrying a provider. LiteLLM then took the first
+half as the provider and sent only the rest, so a compatibility endpoint either failed with
+`LLM Provider NOT provided` or received `gpt-5.6-terra` instead of the namespaced name. The ADK,
+Strands, Agno, LlamaIndex and CrewAI Bots now keep the chosen provider in front, and the whole
+model name reaches the endpoint.
+
 ### A Google Drive shortcut is read as the file it points at
 
 Search and recent files return shortcuts as ordinary hits, and reading one by that id was refused
@@ -32,6 +41,12 @@ A tool that declares an output schema often puts the answer in `structuredConten
 content list empty. That empty list was reported as "nothing was found", so the model filled the
 gap from memory while the vendor had answered. The structured object is now read when the content
 list had nothing to say. A tool that already sent text is unchanged.
+The slash no longer names the provider on those five Bots, so a `BOT_MODEL` that relied on it to
+reach somewhere other than `BOT_PROVIDER` is now read as part of the model name: `bedrock/…`,
+`azure/…` and `openrouter/…` reach the provider `BOT_PROVIDER` names rather than the one written in
+front of the slash. `BOT_PROVIDER` is the setting for that, and a model name written bare beside it
+behaves as it did. The framework Bot `agent-langgraph` and the Langroid Bot are unchanged, because
+neither read the slash that way.
 
 ### A coworker can be a file of its own
 
