@@ -4,6 +4,7 @@
  * boot boundary.
  */
 import { singleUserEnabled } from "./auth/dev-actor";
+import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
@@ -85,6 +86,13 @@ export type AuthConfig = {
   secret: string;
   trustedOrigins: string[];
   initialAdminEmails: string[];
+  /**
+   * Email domains this deployment admits, on top of whatever the provider decided.
+   *
+   * Empty means no opinion, which is what every deployment running today already does. See
+   * `auth/email-domain.ts` for why the provider's own answer is not this question.
+   */
+  allowedEmailDomains: string[];
   google?: OAuthClient;
   /**
    * `tenantId` decides who may sign in at all, so it is not a detail. `common` admits any Microsoft
@@ -517,6 +525,30 @@ function commaSeparated(environment: Environment, name: string): string[] {
 }
 
 /**
+ * Microsoft's three multi-tenant audiences, which name no directory.
+ *
+ * Anything else is a directory this deployment's administrators control, named by GUID or by a
+ * verified domain. `organizations` matters as much as `common` here and is the one a hand-written
+ * check forgets: Microsoft's own description is that it admits any work or school account in any
+ * directory, so a domain allowlist is no more enforceable under it than under `common`.
+ *
+ * Compared folded, because these arrive from an environment variable and `Common` is the same
+ * audience as `common` to Microsoft.
+ */
+const MULTI_TENANT_AUDIENCES = new Set([
+  "common",
+  "organizations",
+  "consumers",
+]);
+
+function namesNoDirectory(tenantId: string | undefined): boolean {
+  return (
+    tenantId !== undefined &&
+    MULTI_TENANT_AUDIENCES.has(tenantId.trim().toLowerCase())
+  );
+}
+
+/**
  * Sign-in, if this deployment has an identity provider to sign people in with.
  *
  * Any one of the three turns authentication on. More than one is allowed and is the normal shape
@@ -573,6 +605,68 @@ function authConfig(
     );
   }
 
+  /**
+   * Who may sign in, as distinct from who is an administrator once they have.
+   *
+   * Normalised through the same function the matcher uses, so a rule cannot mean one thing when
+   * written and another when matched.
+   */
+  const namedDomains = commaSeparated(
+    environment,
+    "SIGNIN_ALLOWED_EMAIL_DOMAINS",
+  );
+  const allowedEmailDomains = namedDomains
+    .map(normalizeDomain)
+    .filter((domain): domain is string => domain !== undefined);
+
+  /*
+   * A list that names nothing is not an empty list, and the difference is every sign-in.
+   *
+   * `commaSeparated` drops blank entries BEFORE this normalisation rather than after it, so `@`,
+   * `.` and `@.` each survive it and then normalise to nothing. That leaves a non-empty list no
+   * address can ever match, every visitor refused at the door, and nothing said at boot. The same
+   * reasoning INITIAL_ADMIN_EMAILS gives three lines up applies: start-up is the cheap moment to
+   * catch it, and somebody's sign-in is the expensive one.
+   */
+  if (namedDomains.length > 0 && allowedEmailDomains.length === 0) {
+    throw new Error(
+      "SIGNIN_ALLOWED_EMAIL_DOMAINS is set but names no domain, so every sign-in would be refused. Write it as example.com,example.co.uk",
+    );
+  }
+
+  /*
+   * A list this deployment cannot enforce is worse than no list.
+   *
+   * `common` is multi-tenant, and OpenBot never sets `requireEmailVerification` or reads
+   * `users.emailVerified`, so the address a rule is applied to is one the signing-in tenant's own
+   * administrator wrote. Anybody may create a tenant. So an allowlist under `common` refuses the
+   * honest and admits the rest, while reading on the Boundaries page as though it were a control.
+   *
+   * Refused rather than warned BECAUSE the operator has said what they want: they named domains.
+   * The warning below is for the deployment that has said nothing, where multi-tenant may well be
+   * the intent.
+   */
+  if (allowedEmailDomains.length > 0 && namesNoDirectory(microsoft?.tenantId)) {
+    throw new Error(
+      `SIGNIN_ALLOWED_EMAIL_DOMAINS names domains, but MICROSOFT_OAUTH_TENANT_ID is \`${microsoft?.tenantId}\`, which names no directory and admits accounts from any of them: the address the list is checked against is one the signing-in tenant writes for itself, so the list cannot hold. Set your directory GUID.`,
+    );
+  }
+
+  /*
+   * Nothing at all deciding who may sign in, on a deployment that is deployed. A warning rather
+   * than a refusal, because a genuinely multi-tenant deployment is a real thing; arriving there by
+   * setting nothing is the case worth naming.
+   */
+  if (
+    isProduction(environment) &&
+    allowedEmailDomains.length === 0 &&
+    namesNoDirectory(microsoft?.tenantId)
+  ) {
+    console.warn(
+      "MICROSOFT_OAUTH_TENANT_ID is unset, so it is `common` and any Microsoft account may sign in, including personal ones, and SIGNIN_ALLOWED_EMAIL_DOMAINS names no domain either. Set your directory GUID, or name the domains you admit.",
+    );
+  }
+
   return {
     baseUrl,
     secret,
@@ -585,6 +679,7 @@ function authConfig(
          */
         ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
     initialAdminEmails,
+    allowedEmailDomains,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
     ...(okta ? { okta } : {}),
