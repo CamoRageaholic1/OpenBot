@@ -95,12 +95,20 @@ OpenBot's own policy engine is consulted: the engine decides browser navigation 
 the shell reaches the network directly.
 
 `disablePodIMDS` sets the hop limit to 1, so a packet from a pod, which has one more hop to make
-than one from the node itself, no longer arrives. `disableIMDSv1` is what turns that into a control
-rather than a formality: the hop limit applies to the IMDSv2 token PUT, and IMDSv1 is a bare GET
-with no PUT to limit, so while v1 is allowed the hop limit stops nothing. eksctl sets
-`httpTokens: required` for either flag, so the second line is belt and braces, written out because
-the first alone does nothing without it. Note this covers pods on the cluster network; a pod running
-with `hostNetwork: true` is on the node and still reaches the address.
+than one from the node itself, no longer arrives. That hop limit applies to the IMDSv2 token PUT,
+and IMDSv1 is a bare GET with no PUT to limit, so the hop limit only means anything once a token is
+mandatory. It already is: eksctl documents `disableIMDSv1` as defaulting to true, and sets
+`httpTokens: required` for either flag. `disableIMDSv1: true` is written out here to state that
+rather than to change it, since a reader deciding whether this recipe is safe should not have to
+know an upstream default. Note this covers pods on the cluster network; a pod running with
+`hostNetwork: true` is on the node and still reaches the address.
+
+**What the hop limit costs.** The EBS CSI driver reads EC2 instance metadata from IMDS, and its own
+FAQ asks for "the hop limit for IMDSv2 responses ... set to 2 or greater" in a containerized
+environment like EKS. A hop limit of 1 also rules out `MutableCSINodeAllocatableCount`, whose
+documented prerequisites are that the driver "must be using IMDS Metadata" and that IMDS be its only
+enabled or preferred metadata source. Drop these two lines if your cluster needs either, and lean on
+the NetworkPolicy below instead.
 
 Two things eksctl will refuse rather than warn about, both worth knowing before the next edit to
 this file: `disablePodIMDS` cannot be combined with `iam.withAddonPolicies` on the same node group,
